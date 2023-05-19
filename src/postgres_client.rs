@@ -1195,7 +1195,7 @@ impl ParallelPostgresClient {
                 msg: format!(
                     "Failed to update the account {:?}, error: {:?}",
                     bs58::encode(account.pubkey()).into_string(),
-                    err
+                    err.to_string()
                 ),
             });
         }

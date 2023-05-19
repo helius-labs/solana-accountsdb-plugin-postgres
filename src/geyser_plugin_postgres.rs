@@ -91,6 +91,9 @@ pub struct GeyserPluginPostgresConfig {
 
     // controls whether block meta is indexed
     pub index_block_meta: Option<bool>,
+
+    // controls whether slots are indexed
+    pub index_slots: Option<bool>,
 }
 
 #[derive(Error, Debug)]
@@ -316,6 +319,9 @@ impl GeyserPlugin for GeyserPluginPostgres {
         parent: Option<u64>,
         status: SlotStatus,
     ) -> Result<()> {
+        if !self.config.index_slots.unwrap_or(true) {
+            return Ok(());
+        }
         info!("Updating slot {:?} at with status {:?}", slot, status);
 
         match &mut self.client {
