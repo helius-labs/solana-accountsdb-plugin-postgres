@@ -3,7 +3,7 @@ authors = ["Solana Maintainers <maintainers@solana.foundation>"]
 edition = "2021"
 name = "solana-geyser-plugin-postgres"
 description = "The Solana AccountsDb plugin for PostgreSQL database."
-version = "1.15.2"
+version = "1.14.0"
 repository = "https://github.com/solana-labs/solana"
 license = "Apache-2.0"
 homepage = "https://solana.com/"
@@ -21,19 +21,22 @@ log = "0.4.17"
 openssl = { version = "0.10.42" }
 postgres = { version = "0.19.4", features = ["with-chrono-0_4"] }
 postgres-types = { version = "0.2.4", features = ["derive"] }
-postgres-openssl = { version = "0.5.0"}
+postgres-openssl = { version = "0.5.0" }
 serde = "1.0.145"
 serde_derive = "1.0.145"
 serde_json = "1.0.85"
-solana-geyser-plugin-interface = { version = "=1.15.2" }
-solana-logger = { version = "=1.15.2" }
-solana-measure = { version = "=1.15.2" }
-solana-metrics = { version = "=1.15.2" }
-solana-runtime = { version = "=1.15.2" }
-solana-sdk = { version = "=1.15.2" }
-solana-transaction-status = { version = "=1.15.2" }
+solana-geyser-plugin-interface = { version = "~1.14" }
+solana-logger = { version = "~1.14" }
+solana-measure = { version = "~1.14" }
+solana-metrics = { version = "~1.14" }
+solana-runtime = { version = "~1.14" }
+solana-sdk = { version = "~1.14" }
+solana-transaction-status = { version = "~1.14" }
+solana-account-decoder = { version = "~1.14" }
 thiserror = "1.0.37"
 tokio-postgres = "0.7.7"
+spl-token-2022 = "0.6.1"
+base64 = "0.21.0"
 
 [dev-dependencies]
 libc = "0.2.134"
@@ -41,11 +44,10 @@ libloading = "0.7.3"
 serial_test = "0.9.0"
 socket2 = { version = "0.4.7", features = ["all"] }
 
-solana-account-decoder = { version = "=1.15.2" }
-solana-core = { version = "=1.15.2" }
-solana-local-cluster = { version = "=1.15.2" }
-solana-net-utils = { version = "=1.15.2" }
-solana-streamer = { version = "=1.15.2" }
+solana-core = { version = "~1.14" }
+solana-local-cluster = { version = "~1.14" }
+solana-net-utils = { version = "~1.14" }
+solana-streamer = { version = "~1.14" }
 tempfile = "3.3.0"
 
 [package.metadata.docs.rs]

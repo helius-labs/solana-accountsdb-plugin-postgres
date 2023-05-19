@@ -1,5 +1,7 @@
 #![allow(clippy::integer_arithmetic)]
 
+use solana_geyser_plugin_interface::geyser_plugin_interface::ReplicaBlockInfo;
+
 mod postgres_client_account_index;
 mod postgres_client_block_metadata;
 mod postgres_client_transaction;
@@ -19,7 +21,7 @@ use {
     postgres_client_transaction::LogTransactionRequest,
     postgres_openssl::MakeTlsConnector,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
-        GeyserPluginError, ReplicaAccountInfoV2, ReplicaBlockInfoV2, SlotStatus,
+        GeyserPluginError, ReplicaAccountInfoV2, SlotStatus,
     },
     solana_measure::measure::Measure,
     solana_metrics::*,
@@ -1232,7 +1234,7 @@ impl ParallelPostgresClient {
 
     pub fn update_block_metadata(
         &mut self,
-        block_info: &ReplicaBlockInfoV2,
+        block_info: &ReplicaBlockInfo,
     ) -> Result<(), GeyserPluginError> {
         if let Err(err) = self.sender.send(DbWorkItem::UpdateBlockMetadata(Box::new(
             UpdateBlockMetadataRequest {
