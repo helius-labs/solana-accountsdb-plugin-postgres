@@ -67,13 +67,16 @@ impl SimplePostgresClient {
         block_info: UpdateBlockMetadataRequest,
     ) -> Result<(), GeyserPluginError> {
         let client = self.client.get_mut().unwrap();
+        if client.update_block_metadata_stmt.is_none() {
+            return Ok(());
+        }
         let statement = &client.update_block_metadata_stmt;
         let client = &mut client.client;
         let updated_on = Utc::now().naive_utc();
 
         let block_info = block_info.block_info;
         let result = client.query(
-            statement,
+            &statement.clone().unwrap(),
             &[
                 &block_info.slot,
                 &block_info.blockhash,

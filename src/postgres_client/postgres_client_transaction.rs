@@ -565,13 +565,16 @@ impl SimplePostgresClient {
         transaction_log_info: LogTransactionRequest,
     ) -> Result<(), GeyserPluginError> {
         let client = self.client.get_mut().unwrap();
+        if client.update_transaction_log_stmt.is_none() {
+            return Ok(());
+        }
         let statement = &client.update_transaction_log_stmt;
         let client = &mut client.client;
         let updated_on = Utc::now().naive_utc();
 
         let transaction_info = transaction_log_info.transaction_info;
         let result = client.query(
-            statement,
+            &statement.clone().unwrap(),
             &[
                 &transaction_info.signature,
                 &transaction_info.is_vote,

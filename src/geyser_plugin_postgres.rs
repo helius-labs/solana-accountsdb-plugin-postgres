@@ -94,6 +94,9 @@ pub struct GeyserPluginPostgresConfig {
 
     // controls whether slots are indexed
     pub index_slots: Option<bool>,
+
+    // controls whether txns are indexed
+    pub index_txns: Option<bool>,
 }
 
 #[derive(Error, Debug)]
@@ -374,6 +377,9 @@ impl GeyserPlugin for GeyserPluginPostgres {
         transaction_info: ReplicaTransactionInfoVersions,
         slot: u64,
     ) -> Result<()> {
+        if !self.config.index_txns.unwrap_or(true) {
+            return Ok(());
+        }
         match &mut self.client {
             None => {
                 return Err(GeyserPluginError::Custom(Box::new(
