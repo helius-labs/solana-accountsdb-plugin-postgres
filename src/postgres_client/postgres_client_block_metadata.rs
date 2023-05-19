@@ -9,7 +9,7 @@ use {
     log::*,
     postgres::{Client, Statement},
     solana_geyser_plugin_interface::geyser_plugin_interface::{
-        GeyserPluginError, ReplicaBlockInfoV2,
+        GeyserPluginError, ReplicaBlockInfo,
     },
 };
 
@@ -22,8 +22,8 @@ pub struct DbBlockInfo {
     pub block_height: Option<i64>,
 }
 
-impl<'a> From<&ReplicaBlockInfoV2<'a>> for DbBlockInfo {
-    fn from(block_info: &ReplicaBlockInfoV2) -> Self {
+impl<'a> From<&ReplicaBlockInfo<'a>> for DbBlockInfo {
+    fn from(block_info: &ReplicaBlockInfo) -> Self {
         Self {
             slot: block_info.slot as i64,
             blockhash: block_info.blockhash.to_string(),
@@ -67,13 +67,16 @@ impl SimplePostgresClient {
         block_info: UpdateBlockMetadataRequest,
     ) -> Result<(), GeyserPluginError> {
         let client = self.client.get_mut().unwrap();
+        if client.update_block_metadata_stmt.is_none() {
+            return Ok(());
+        }
         let statement = &client.update_block_metadata_stmt;
         let client = &mut client.client;
         let updated_on = Utc::now().naive_utc();
 
         let block_info = block_info.block_info;
         let result = client.query(
-            statement,
+            &statement.clone().unwrap(),
             &[
                 &block_info.slot,
                 &block_info.blockhash,

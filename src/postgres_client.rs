@@ -1,5 +1,7 @@
 #![allow(clippy::integer_arithmetic)]
 
+use solana_geyser_plugin_interface::geyser_plugin_interface::ReplicaBlockInfo;
+
 mod postgres_client_account_index;
 mod postgres_client_block_metadata;
 mod postgres_client_transaction;
@@ -19,7 +21,7 @@ use {
     postgres_client_transaction::LogTransactionRequest,
     postgres_openssl::MakeTlsConnector,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
-        GeyserPluginError, ReplicaAccountInfoV2, ReplicaBlockInfoV2, SlotStatus,
+        GeyserPluginError, ReplicaAccountInfoV2, SlotStatus,
     },
     solana_measure::measure::Measure,
     solana_metrics::*,
@@ -51,10 +53,10 @@ struct PostgresSqlClientWrapper {
     client: Client,
     update_account_stmt: Statement,
     bulk_account_insert_stmt: Statement,
-    update_slot_with_parent_stmt: Statement,
-    update_slot_without_parent_stmt: Statement,
-    update_transaction_log_stmt: Statement,
-    update_block_metadata_stmt: Statement,
+    update_slot_with_parent_stmt: Option<Statement>,
+    update_slot_without_parent_stmt: Option<Statement>,
+    update_transaction_log_stmt: Option<Statement>,
+    update_block_metadata_stmt: Option<Statement>,
     insert_account_audit_stmt: Option<Statement>,
     insert_token_owner_index_stmt: Option<Statement>,
     insert_token_mint_index_stmt: Option<Statement>,
@@ -707,15 +709,16 @@ impl SimplePostgresClient {
         }
 
         let mut measure = Measure::start("geyser-plugin-postgres-flush-slots-us");
-
-        for slot in &self.slots_at_startup {
-            Self::upsert_slot_status_internal(
-                *slot,
-                None,
-                SlotStatus::Rooted,
-                client,
-                insert_slot_stmt,
-            )?;
+        if insert_slot_stmt.is_some() {
+            for slot in &self.slots_at_startup {
+                Self::upsert_slot_status_internal(
+                    *slot,
+                    None,
+                    SlotStatus::Rooted,
+                    client,
+                    &insert_slot_stmt.clone().unwrap(),
+                )?;
+            }
         }
         measure.stop();
 
@@ -771,14 +774,33 @@ impl SimplePostgresClient {
             Self::build_bulk_account_insert_statement(&mut client, config)?;
         let update_account_stmt = Self::build_single_account_upsert_statement(&mut client, config)?;
 
-        let update_slot_with_parent_stmt =
-            Self::build_slot_upsert_statement_with_parent(&mut client, config)?;
-        let update_slot_without_parent_stmt =
-            Self::build_slot_upsert_statement_without_parent(&mut client, config)?;
-        let update_transaction_log_stmt =
-            Self::build_transaction_info_upsert_statement(&mut client, config)?;
-        let update_block_metadata_stmt =
-            Self::build_block_metadata_upsert_statement(&mut client, config)?;
+        let mut update_slot_with_parent_stmt = None;
+        let mut update_slot_without_parent_stmt = None;
+        if config.index_slots.unwrap_or(true) {
+            update_slot_with_parent_stmt = Some(Self::build_slot_upsert_statement_with_parent(
+                &mut client,
+                config,
+            )?);
+            update_slot_without_parent_stmt = Some(
+                Self::build_slot_upsert_statement_without_parent(&mut client, config)?,
+            );
+        }
+
+        let mut update_transaction_log_stmt = None;
+        if config.index_txns.unwrap_or(true) {
+            update_transaction_log_stmt = Some(Self::build_transaction_info_upsert_statement(
+                &mut client,
+                config,
+            )?);
+        }
+
+        let mut update_block_metadata_stmt = None;
+        if config.index_block_meta.unwrap_or(true) {
+            update_block_metadata_stmt = Some(Self::build_block_metadata_upsert_statement(
+                &mut client,
+                config,
+            )?);
+        }
 
         let batch_size = config
             .batch_size
@@ -909,11 +931,20 @@ impl PostgresClient for SimplePostgresClient {
         let client = self.client.get_mut().unwrap();
 
         let statement = match parent {
-            Some(_) => &client.update_slot_with_parent_stmt,
-            None => &client.update_slot_without_parent_stmt,
+            Some(_) => client.update_slot_with_parent_stmt.clone(),
+            None => client.update_slot_without_parent_stmt.clone(),
         };
+        if statement.is_none() {
+            return Ok(());
+        }
 
-        Self::upsert_slot_status_internal(slot, parent, status, &mut client.client, statement)
+        Self::upsert_slot_status_internal(
+            slot,
+            parent,
+            status,
+            &mut client.client,
+            &statement.unwrap(),
+        )
     }
 
     fn notify_end_of_startup(&mut self) -> Result<(), GeyserPluginError> {
@@ -1193,7 +1224,7 @@ impl ParallelPostgresClient {
                 msg: format!(
                     "Failed to update the account {:?}, error: {:?}",
                     bs58::encode(account.pubkey()).into_string(),
-                    err
+                    err.to_string()
                 ),
             });
         }
@@ -1232,7 +1263,7 @@ impl ParallelPostgresClient {
 
     pub fn update_block_metadata(
         &mut self,
-        block_info: &ReplicaBlockInfoV2,
+        block_info: &ReplicaBlockInfo,
     ) -> Result<(), GeyserPluginError> {
         if let Err(err) = self.sender.send(DbWorkItem::UpdateBlockMetadata(Box::new(
             UpdateBlockMetadataRequest {

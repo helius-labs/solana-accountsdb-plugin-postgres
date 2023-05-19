@@ -1,3 +1,9 @@
+use solana_account_decoder::parse_token::is_known_spl_token_id;
+use solana_runtime::inline_spl_token::{
+    SPL_TOKEN_ACCOUNT_MINT_OFFSET, SPL_TOKEN_ACCOUNT_OWNER_OFFSET,
+};
+use solana_sdk::pubkey::PUBKEY_BYTES;
+use spl_token_2022::{solana_program::program_pack::Pack, state::Account as TokenAccount};
 use {
     super::{
         DbAccountInfo, ReadableAccountInfo, SimplePostgresClient,
@@ -386,5 +392,74 @@ impl SimplePostgresClient {
     pub fn clear_buffered_indexes(&mut self) {
         self.pending_token_owner_index.clear();
         self.pending_token_mint_index.clear();
+    }
+}
+
+pub fn get_spl_token_owner(account: DbAccountInfo) -> Option<Pubkey> {
+    if !is_known_spl_token_id(&Pubkey::try_from(account.owner).unwrap()) {
+        return None;
+    }
+    if account.data.len() != TokenAccount::get_packed_len() {
+        return None;
+    }
+    let spl_owner = Pubkey::try_from(
+        &account.data
+            [SPL_TOKEN_ACCOUNT_OWNER_OFFSET..SPL_TOKEN_ACCOUNT_OWNER_OFFSET + PUBKEY_BYTES],
+    );
+    if spl_owner.is_err() {
+        return None;
+    }
+    Some(spl_owner.unwrap())
+}
+
+pub fn get_spl_token_mint(account: DbAccountInfo) -> Option<Pubkey> {
+    if !is_known_spl_token_id(&Pubkey::try_from(account.owner).unwrap()) {
+        return None;
+    }
+    if account.data.len() != TokenAccount::get_packed_len() {
+        return None;
+    }
+    let spl_mint = Pubkey::try_from(
+        &account.data[SPL_TOKEN_ACCOUNT_MINT_OFFSET..SPL_TOKEN_ACCOUNT_MINT_OFFSET + PUBKEY_BYTES],
+    );
+    if spl_mint.is_err() {
+        return None;
+    }
+    Some(spl_mint.unwrap())
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use base64;
+
+    use crate::postgres_client::DbAccountInfo;
+
+    #[test]
+    fn test_get_spl_token() {
+        let b64_data = "wl76U00YWXSRENdWFj/dvnT+gpdjLBZIHO6o8PuLN4obJwfQ5xhGl+c8267QMFDFNg9ambAd1c+NvzLY/bTQmADKmjsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let token_program = bs58::decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+            .into_vec()
+            .unwrap();
+        let account = DbAccountInfo {
+            pubkey: token_program.clone(),
+            lamports: 1,
+            owner: token_program,
+            executable: false,
+            rent_epoch: 1,
+            data: base64::decode(b64_data).unwrap(),
+            slot: 1,
+            write_version: 1,
+            txn_signature: None,
+        };
+        let owner = super::get_spl_token_owner(account.clone());
+        let mint = super::get_spl_token_mint(account);
+        assert_eq!(
+            owner.unwrap().to_string(),
+            "2pzXYcf1gNkS1QdJKGDLg8Cd1AFNMgBt7xLyiWrNZcJb"
+        );
+        assert_eq!(
+            mint.unwrap().to_string(),
+            "E5k6MJkWntCoQCh7eN3GWchXMGtAWSE71D2J1ZhpB8vD"
+        );
     }
 }
