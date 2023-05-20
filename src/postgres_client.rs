@@ -1,5 +1,8 @@
 #![allow(clippy::integer_arithmetic)]
 
+use std::time::Instant;
+
+use cadence_macros::{statsd_count, statsd_time};
 use solana_geyser_plugin_interface::geyser_plugin_interface::ReplicaBlockInfo;
 
 mod postgres_client_account_index;
@@ -23,8 +26,6 @@ use {
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPluginError, ReplicaAccountInfoV2, SlotStatus,
     },
-    solana_measure::measure::Measure,
-    solana_metrics::*,
     solana_sdk::timing::AtomicInterval,
     std::{
         collections::HashSet,
@@ -626,8 +627,7 @@ impl SimplePostgresClient {
 
     fn bulk_insert_accounts(&mut self) -> Result<(), GeyserPluginError> {
         if self.pending_account_updates.len() == self.batch_size {
-            let mut measure = Measure::start("geyser-plugin-postgres-prepare-values");
-
+            let start = Instant::now();
             let mut values: Vec<&(dyn types::ToSql + Sync)> =
                 Vec::with_capacity(self.batch_size * ACCOUNT_COLUMN_COUNT);
             let updated_on = Utc::now().naive_utc();
@@ -645,15 +645,7 @@ impl SimplePostgresClient {
                 values.push(&updated_on);
                 values.push(&account.txn_signature);
             }
-            measure.stop();
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-prepare-values-us",
-                measure.as_us() as usize,
-                10000,
-                10000
-            );
 
-            let mut measure = Measure::start("geyser-plugin-postgres-update-account");
             let client = self.client.get_mut().unwrap();
             let result = client
                 .client
@@ -669,20 +661,7 @@ impl SimplePostgresClient {
                 error!("{}", msg);
                 return Err(GeyserPluginError::AccountsUpdateError { msg });
             }
-
-            measure.stop();
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-update-account-us",
-                measure.as_us() as usize,
-                10000,
-                10000
-            );
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-update-account-count",
-                self.batch_size,
-                10000,
-                10000
-            );
+            statsd_time!("bulk_insert_accounts", start.elapsed());
         }
         Ok(())
     }
@@ -697,6 +676,7 @@ impl SimplePostgresClient {
         let insert_slot_stmt = &client.update_slot_without_parent_stmt;
         let client = &mut client.client;
 
+        let start = Instant::now();
         for account in self.pending_account_updates.drain(..) {
             Self::upsert_account_internal(
                 &account,
@@ -707,27 +687,7 @@ impl SimplePostgresClient {
                 insert_token_mint_index_stmt,
             )?;
         }
-
-        let mut measure = Measure::start("geyser-plugin-postgres-flush-slots-us");
-        if insert_slot_stmt.is_some() {
-            for slot in &self.slots_at_startup {
-                Self::upsert_slot_status_internal(
-                    *slot,
-                    None,
-                    SlotStatus::Rooted,
-                    client,
-                    &insert_slot_stmt.clone().unwrap(),
-                )?;
-            }
-        }
-        measure.stop();
-
-        datapoint_info!(
-            "geyser_plugin_notify_account_restore_from_snapshot_summary",
-            ("flush_slots-us", measure.as_us(), i64),
-            ("flush-slots-counts", self.slots_at_startup.len(), i64),
-        );
-
+        statsd_time!("account_index_geyser.upsert_accounts", start.elapsed());
         self.slots_at_startup.clear();
         self.clear_buffered_indexes();
         Ok(())
@@ -1013,15 +973,8 @@ impl PostgresClientWorker {
         panic_on_db_errors: bool,
     ) -> Result<(), GeyserPluginError> {
         while !exit_worker.load(Ordering::Relaxed) {
-            let mut measure = Measure::start("geyser-plugin-postgres-worker-recv");
             let work = receiver.recv_timeout(Duration::from_millis(500));
-            measure.stop();
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-worker-recv-us",
-                measure.as_us() as usize,
-                100000,
-                100000
-            );
+            let start = Instant::now();
             match work {
                 Ok(work) => match work {
                     DbWorkItem::UpdateAccount(request) => {
@@ -1030,10 +983,15 @@ impl PostgresClientWorker {
                             .update_account(request.account, request.is_startup)
                         {
                             error!("Failed to update account: ({})", err);
+                            statsd_count!("account_index_geyser.update_account.db_error", 1);
                             if panic_on_db_errors {
                                 abort();
                             }
                         }
+                        statsd_time!(
+                            "account_index_geyser.update_account.db_write",
+                            start.elapsed()
+                        );
                     }
                     DbWorkItem::UpdateSlot(request) => {
                         if let Err(err) = self.client.update_slot_status(
@@ -1196,30 +1154,14 @@ impl ParallelPostgresClient {
             return Ok(());
         }
 
-        if self.last_report.should_update(30000) {
-            datapoint_debug!(
-                "postgres-plugin-stats",
-                ("message-queue-length", self.sender.len() as i64, i64),
-            );
-        }
-        let mut measure = Measure::start("geyser-plugin-posgres-create-work-item");
+        let start = Instant::now();
         let wrk_item = DbWorkItem::UpdateAccount(Box::new(UpdateAccountRequest {
             account: DbAccountInfo::new(account, slot),
             is_startup,
         }));
 
-        measure.stop();
-
-        inc_new_counter_debug!(
-            "geyser-plugin-posgres-create-work-item-us",
-            measure.as_us() as usize,
-            100000,
-            100000
-        );
-
-        let mut measure = Measure::start("geyser-plugin-posgres-send-msg");
-
         if let Err(err) = self.sender.send(wrk_item) {
+            statsd_count!("account_index_geyser.update_account.error.send_error", 1);
             return Err(GeyserPluginError::AccountsUpdateError {
                 msg: format!(
                     "Failed to update the account {:?}, error: {:?}",
@@ -1229,13 +1171,7 @@ impl ParallelPostgresClient {
             });
         }
 
-        measure.stop();
-        inc_new_counter_debug!(
-            "geyser-plugin-posgres-send-msg-us",
-            measure.as_us() as usize,
-            100000,
-            100000
-        );
+        statsd_time!("send_db_work_item", start.elapsed());
 
         Ok(())
     }

@@ -1,3 +1,6 @@
+use std::time::Instant;
+
+use cadence_macros::statsd_time;
 use solana_account_decoder::parse_token::is_known_spl_token_id;
 use solana_runtime::inline_spl_token::{
     SPL_TOKEN_ACCOUNT_MINT_OFFSET, SPL_TOKEN_ACCOUNT_OWNER_OFFSET,
@@ -17,8 +20,6 @@ use {
     log::*,
     postgres::{Client, Statement},
     solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPluginError,
-    solana_measure::measure::Measure,
-    solana_metrics::*,
     solana_sdk::pubkey::Pubkey,
     tokio_postgres::types,
 };
@@ -147,8 +148,6 @@ impl SimplePostgresClient {
         query: &Statement,
     ) -> Result<(), GeyserPluginError> {
         if index_entries.len() == batch_size {
-            let mut measure = Measure::start("geyser-plugin-postgres-prepare-index-values");
-
             let mut values: Vec<&(dyn types::ToSql + Sync)> =
                 Vec::with_capacity(batch_size * TOKEN_INDEX_COLUMN_COUNT);
             for index in index_entries.iter().take(batch_size) {
@@ -156,15 +155,6 @@ impl SimplePostgresClient {
                 values.push(&index.account_key);
                 values.push(&index.slot);
             }
-            measure.stop();
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-prepare-index-values-us",
-                measure.as_us() as usize,
-                10000,
-                10000
-            );
-
-            let mut measure = Measure::start("geyser-plugin-postgres-update-index-account");
             let result = client.query(query, &values);
 
             index_entries.clear();
@@ -177,52 +167,44 @@ impl SimplePostgresClient {
                 error!("{}", msg);
                 return Err(GeyserPluginError::AccountsUpdateError { msg });
             }
-
-            measure.stop();
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-update-index-us",
-                measure.as_us() as usize,
-                10000,
-                10000
-            );
-            inc_new_counter_debug!(
-                "geyser-plugin-postgres-update-index-count",
-                batch_size,
-                10000,
-                10000
-            );
         }
         Ok(())
     }
 
     /// Execute the token owner bulk insert query.
     pub fn bulk_insert_token_owner_index(&mut self) -> Result<(), GeyserPluginError> {
+        let start = Instant::now();
         let client = self.client.get_mut().unwrap();
         if client.bulk_insert_token_owner_index_stmt.is_none() {
             return Ok(());
         }
         let query = client.bulk_insert_token_owner_index_stmt.as_ref().unwrap();
-        Self::bulk_insert_token_index_common(
+        let result = Self::bulk_insert_token_index_common(
             self.batch_size,
             &mut client.client,
             &mut self.pending_token_owner_index,
             query,
-        )
+        );
+        statsd_time!("bulk_insert_token_owner_index", start.elapsed());
+        result
     }
 
     /// Execute the token mint index bulk insert query.
     pub fn bulk_insert_token_mint_index(&mut self) -> Result<(), GeyserPluginError> {
+        let start = Instant::now();
         let client = self.client.get_mut().unwrap();
         if client.bulk_insert_token_mint_index_stmt.is_none() {
             return Ok(());
         }
         let query = client.bulk_insert_token_mint_index_stmt.as_ref().unwrap();
-        Self::bulk_insert_token_index_common(
+        let result = Self::bulk_insert_token_index_common(
             self.batch_size,
             &mut client.client,
             &mut self.pending_token_mint_index,
             query,
-        )
+        );
+        statsd_time!("bulk_insert_token_owner_index", start.elapsed());
+        result
     }
 
     /// Generic function to queue the token owner index for bulk insert.

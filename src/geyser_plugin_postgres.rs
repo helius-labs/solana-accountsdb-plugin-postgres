@@ -1,3 +1,9 @@
+use std::{env, net::UdpSocket, time::Instant};
+
+use cadence::{BufferedUdpMetricSink, QueuingMetricSink, StatsdClient};
+use cadence_macros::{set_global_default, statsd_count, statsd_gauge, statsd_time};
+use tracing_subscriber::fmt;
+
 /// Main entry for the PostgreSQL plugin
 use {
     crate::{
@@ -13,8 +19,6 @@ use {
         GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
         ReplicaTransactionInfoVersions, Result, SlotStatus,
     },
-    solana_measure::measure::Measure,
-    solana_metrics::*,
     std::{fs::File, io::Read},
     thiserror::Error,
 };
@@ -230,6 +234,11 @@ impl GeyserPlugin for GeyserPluginPostgres {
     ) -> Result<()> {
         // skip updating account on startup of batch_optimize_by_skiping_older_slots
         // is configured
+        if is_startup {
+            statsd_gauge!("is_startup", 1);
+        } else {
+            statsd_gauge!("is_startup", 0);
+        }
         if is_startup
             && self
                 .batch_starting_slot
@@ -239,7 +248,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
             return Ok(());
         }
 
-        let mut measure_all = Measure::start("geyser-plugin-postgres-update-account-main");
+        let start = Instant::now();
         match account {
             ReplicaAccountInfoVersions::V0_0_1(_) => {
                 return Err(GeyserPluginError::Custom(Box::new(
@@ -247,8 +256,6 @@ impl GeyserPlugin for GeyserPluginPostgres {
                 )));
             }
             ReplicaAccountInfoVersions::V0_0_2(account) => {
-                let mut measure_select =
-                    Measure::start("geyser-plugin-postgres-update-account-select");
                 if let Some(accounts_selector) = &self.accounts_selector {
                     if !accounts_selector.is_account_selected(account.pubkey, account.owner) {
                         return Ok(());
@@ -256,13 +263,6 @@ impl GeyserPlugin for GeyserPluginPostgres {
                 } else {
                     return Ok(());
                 }
-                measure_select.stop();
-                inc_new_counter_debug!(
-                    "geyser-plugin-postgres-update-account-select-us",
-                    measure_select.as_us() as usize,
-                    100000,
-                    100000
-                );
 
                 debug!(
                     "Updating account {:?} with owner {:?} at slot {:?} using account selector {:?}",
@@ -274,6 +274,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
 
                 match &mut self.client {
                     None => {
+                        statsd_count!("account_index_geyser.update_account.error.db_connect", 1);
                         return Err(GeyserPluginError::Custom(Box::new(
                             GeyserPluginPostgresError::DataStoreConnectionError {
                                 msg: "There is no connection to the PostgreSQL database."
@@ -282,19 +283,10 @@ impl GeyserPlugin for GeyserPluginPostgres {
                         )));
                     }
                     Some(client) => {
-                        let mut measure_update =
-                            Measure::start("geyser-plugin-postgres-update-account-client");
                         let result = { client.update_account(account, slot, is_startup) };
-                        measure_update.stop();
-
-                        inc_new_counter_debug!(
-                            "geyser-plugin-postgres-update-account-client-us",
-                            measure_update.as_us() as usize,
-                            100000,
-                            100000
-                        );
 
                         if let Err(err) = result {
+                            statsd_count!("account_index_geyser.update_account.error", 1);
                             return Err(GeyserPluginError::AccountsUpdateError {
                                 msg: format!("Failed to persist the update of account to the PostgreSQL database. Error: {:?}", err)
                             });
@@ -303,15 +295,8 @@ impl GeyserPlugin for GeyserPluginPostgres {
                 }
             }
         }
-
-        measure_all.stop();
-
-        inc_new_counter_debug!(
-            "geyser-plugin-postgres-update-account-main-us",
-            measure_all.as_us() as usize,
-            100000,
-            100000
-        );
+        statsd_time!("update_account", start.elapsed());
+        statsd_count!("update_account", 1);
 
         Ok(())
     }
@@ -520,8 +505,32 @@ impl GeyserPluginPostgres {
     }
 
     pub fn new() -> Self {
+        let env_filter = env::var("RUST_LOG")
+            .or::<Result<String>>(Ok("info".to_string()))
+            .unwrap();
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .event_format(fmt::format::json())
+            .init();
+        new_metrics_client();
         Self::default()
     }
+}
+
+fn new_metrics_client() {
+    let uri = env::var("METRICS_URI")
+        .or::<String>(Ok("127.0.0.1".to_string()))
+        .unwrap();
+    let port = 8125;
+    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    socket.set_nonblocking(true).unwrap();
+
+    let host = (uri, port);
+    let udp_sink = BufferedUdpMetricSink::from(host, socket).unwrap();
+    let queuing_sink = QueuingMetricSink::from(udp_sink);
+    let builder = StatsdClient::builder("account_index_postgres", queuing_sink);
+    let client = builder.build();
+    set_global_default(client);
 }
 
 #[no_mangle]
