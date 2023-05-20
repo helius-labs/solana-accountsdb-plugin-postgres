@@ -19,7 +19,7 @@ chrono = { version = "0.4.22", features = ["serde"] }
 crossbeam-channel = "0.5.6"
 log = "0.4.17"
 openssl = { version = "0.10.42" }
-postgres = { version = "0.18.1", features = ["with-chrono-0_4"] }
+postgres = { version = "0.19.4", features = ["with-chrono-0_4"] }
 postgres-types = { version = "0.2.4", features = ["derive"] }
 postgres-openssl = { version = "0.5.0" }
 serde = "1.0.145"
