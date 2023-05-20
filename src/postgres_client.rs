@@ -687,7 +687,7 @@ impl SimplePostgresClient {
                 insert_token_mint_index_stmt,
             )?;
         }
-        statsd_time!("account_index_geyser.upsert_accounts", start.elapsed());
+        statsd_time!("upsert_accounts", start.elapsed());
         self.slots_at_startup.clear();
         self.clear_buffered_indexes();
         Ok(())
@@ -983,15 +983,12 @@ impl PostgresClientWorker {
                             .update_account(request.account, request.is_startup)
                         {
                             error!("Failed to update account: ({})", err);
-                            statsd_count!("account_index_geyser.update_account.db_error", 1);
+                            statsd_count!("update_account.db_error", 1);
                             if panic_on_db_errors {
                                 abort();
                             }
                         }
-                        statsd_time!(
-                            "account_index_geyser.update_account.db_write",
-                            start.elapsed()
-                        );
+                        statsd_time!("update_account.db_write", start.elapsed());
                     }
                     DbWorkItem::UpdateSlot(request) => {
                         if let Err(err) = self.client.update_slot_status(
@@ -1161,7 +1158,7 @@ impl ParallelPostgresClient {
         }));
 
         if let Err(err) = self.sender.send(wrk_item) {
-            statsd_count!("account_index_geyser.update_account.error.send_error", 1);
+            statsd_count!("update_account.error.send_error", 1);
             return Err(GeyserPluginError::AccountsUpdateError {
                 msg: format!(
                     "Failed to update the account {:?}, error: {:?}",

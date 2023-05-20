@@ -274,7 +274,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
 
                 match &mut self.client {
                     None => {
-                        statsd_count!("account_index_geyser.update_account.error.db_connect", 1);
+                        statsd_count!("update_account.error.db_connect", 1);
                         return Err(GeyserPluginError::Custom(Box::new(
                             GeyserPluginPostgresError::DataStoreConnectionError {
                                 msg: "There is no connection to the PostgreSQL database."
@@ -286,7 +286,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
                         let result = { client.update_account(account, slot, is_startup) };
 
                         if let Err(err) = result {
-                            statsd_count!("account_index_geyser.update_account.error", 1);
+                            statsd_count!("update_account.error", 1);
                             return Err(GeyserPluginError::AccountsUpdateError {
                                 msg: format!("Failed to persist the update of account to the PostgreSQL database. Error: {:?}", err)
                             });
@@ -528,7 +528,7 @@ fn new_metrics_client() {
     let host = (uri, port);
     let udp_sink = BufferedUdpMetricSink::from(host, socket).unwrap();
     let queuing_sink = QueuingMetricSink::from(udp_sink);
-    let builder = StatsdClient::builder("account_index_postgres", queuing_sink);
+    let builder = StatsdClient::builder("account_index_geyser", queuing_sink);
     let client = builder.build();
     set_global_default(client);
 }
