@@ -521,6 +521,7 @@ fn new_metrics_client() {
     let uri = env::var("METRICS_URI")
         .or::<String>(Ok("127.0.0.1".to_string()))
         .unwrap();
+    info!("Sending statsd metrics to: {}", uri);
     let port = 8125;
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
     socket.set_nonblocking(true).unwrap();
