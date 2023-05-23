@@ -245,6 +245,7 @@ impl GeyserPlugin for GeyserPluginPostgres {
                 .map(|slot_limit| slot < slot_limit)
                 .unwrap_or(false)
         {
+            statsd_count!("skipped_account_on_startup", 1);
             return Ok(());
         }
 
