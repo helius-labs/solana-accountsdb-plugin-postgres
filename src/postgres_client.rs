@@ -1247,6 +1247,7 @@ impl PostgresClientBuilder {
         let batch_optimize_by_skiping_older_slots =
             match config.skip_upsert_existing_accounts_at_startup {
                 true => {
+                    info!("Checking highest slot in DB to determinewhich slots to skip at startup");
                     let mut on_load_client = SimplePostgresClient::new(config)?;
 
                     // database if populated concurrently so we need to move some number of slots
@@ -1260,7 +1261,10 @@ impl PostgresClientBuilder {
                     );
                     Some(batch_slot_bound)
                 }
-                false => None,
+                false => {
+                    info!("Not skipping any slots at startup");
+                    None
+                }
             };
 
         ParallelPostgresClient::new(config).map(|v| (v, batch_optimize_by_skiping_older_slots))
